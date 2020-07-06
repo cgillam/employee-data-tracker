@@ -16,7 +16,44 @@ const con = mysql.createConnection({
     multipleStatements: true
 
 })
+const connect = () => new Promise((resolve, reject) => {
+    con.connect((err) => {
+        if (err) return reject(err)
+        con.query(`
+        create table if not exists departments (
+            id int auto_increment NOT NULL, name varChar(30), primary key(id)
+             
+    
+        );
+        create table if not exists rolls (
+            id int auto_increment NOT NULL, title varChar(30), salery decimal, department_id int, primary key(id),  FOREIGN key (department_id) REFERENCES departments(id) on delete cascade
+             );
+             create table if not exists employees (
+                id int auto_increment NOT NULL, first_name varChar(30),  last_name varChar(30), roll_id int, manager_id int, primary key(id), FOREIGN key (roll_id) REFERENCES rolls(id) on delete cascade, FOREIGN key(manager_id) REFERENCES employees(id) on delete set null
+                 );
+    
+    
+        `, (err) => {
+            if (err) return reject(err)
+            connected = true
+            resolve()
 
+        })
+
+
+    })
+})
+
+let connected = false
+const query = (sql, arguments = undefined) => new Promise(async (resolve, reject) => {
+    if (!connected) await connect()
+    con.query(sql, arguments, (err, result) => {
+        if (err) {
+            return reject(err)
+        }
+        return resolve(result)
+    })
+})
 async function addDepartment() {
     const action = await inquirer.prompt([{
         type: "input",
@@ -30,14 +67,8 @@ async function addDepartment() {
 
 
     }
-    return new Promise((resolve, reject) => {
-        con.query("insert into departments(name) values (?); ", [action.name], (err, result) => {
-            if (err) {
-                return reject(err)
-            }
-            return resolve(result)
-        })
-    })
+    return query("insert into departments(name) values (?); ", [action.name])
+
 
 
 
@@ -45,14 +76,11 @@ async function addDepartment() {
 }
 
 async function addEmployee() {
-    const rollids = await new Promise((resolve, reject) => {
-        con.query("select id from rolls; ", (err, result) => {
-            if (err) {
-                return reject(err)
-            }
-            return resolve(result.map(are => are.id))
-        })
-    })
+    //  const rollIds = await query("select id from rolls; ").then((results) => results.map(are => are.id))
+
+    const rollIds = (await query("select id from rolls; ")).map(are => are.id)
+
+
     const managerids = await new Promise((resolve, reject) => {
         con.query("select id from employees; ", (err, result) => {
             if (err) {
@@ -73,7 +101,7 @@ async function addEmployee() {
         type: "list",
         message: "enter roll id ",
         name: "rollId",
-        choices: rollids
+        choices: rollIds
 
 
 
@@ -101,17 +129,8 @@ async function addEmployee() {
 }
 
 async function viewEmployee() {
-
-    return new Promise((resolve, reject) => {
-        con.query("select * from employees;", (err, result) => {
-            if (err) {
-                return reject(err)
-            }
-            console.table(result)
-
-            return resolve()
-        })
-    })
+    const employees = await query("select * from employees;")
+    console.table(employees)
 }
 async function viewEmployeesByManager() {
     const employeeIds = await new Promise((resolve, reject) => {
@@ -256,19 +275,24 @@ async function viewRoll() {
 
 
 async function addRole() {
-    const departmentids = await new Promise((resolve, reject) => {
-        con.query("select id from departments; ", (err, result) => {
-            if (err) {
-                return reject(err)
-            }
-            return resolve(result.map(are => are.id))
-        })
+    const departmentids = (await query("select id, name from departments; ")).map((department) => {
+        return { name: department.name, value: department.id }
     })
+    if (departmentids.length == 0) {
+        //console.log("no departments found")
+        //return
+        await addDepartment()
+        return addRole()
+
+    }
     const action = await inquirer.prompt([{
         type: "input",
         message: "Enter roll title",
         name: "Title",
-
+        validate: (input) => {
+            if (!input) return ("Title required")
+            return true
+        }
     }, {
         type: "input",
         message: "enter roll salery",
@@ -282,7 +306,7 @@ async function addRole() {
 
     }, {
         type: "list",
-        message: "enter department id ",
+        message: "chose department ",
         name: "id",
         choices: departmentids
 
@@ -291,15 +315,6 @@ async function addRole() {
     }
 
     ])
-
-
-    if (!action.Title) {
-        console.log("Title.required")
-        return
-
-
-
-    }
     return new Promise((resolve, reject) => {
         con.query("insert into rolls(title, salery, department_id) values (?,?,?); ", [action.Title, action.salery, action.id], (err, result) => {
             if (err) {
@@ -456,30 +471,8 @@ async function functionName() {
 
     }
 }
-con.connect((err) => {
-    if (err) throw err
-    con.query(`
-    create table if not exists departments (
-        id int auto_increment NOT NULL, name varChar(30), primary key(id)
-         
-
-    );
-    create table if not exists rolls (
-        id int auto_increment NOT NULL, title varChar(30), salery decimal, department_id int, primary key(id),  FOREIGN key (department_id) REFERENCES departments(id) on delete cascade
-         );
-         create table if not exists employees (
-            id int auto_increment NOT NULL, first_name varChar(30),  last_name varChar(30), roll_id int, manager_id int, primary key(id), FOREIGN key (roll_id) REFERENCES rolls(id) on delete cascade, FOREIGN key(manager_id) REFERENCES employees(id) on delete set null
-             );
-
-
-    `, (err) => {
-        if (err) throw err
-        functionName().then(() => con.end()).catch(
-            (err) => {
-                con.end()
-                console.error(err)
-            })
+functionName().then(() => con.end()).catch(
+    (err) => {
+        con.end()
+        console.error(err)
     })
-
-
-})
